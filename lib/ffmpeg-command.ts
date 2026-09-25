@@ -109,7 +109,7 @@ export function buildFFmpegArgs(params: {
     "-crf",
     crf,
     "-threads",
-    "0", // deixa o FFmpeg escolher; o core atual é single-thread (ver lib/ffmpeg.ts)
+    "0", // usa todos os núcleos quando o core multi-thread está ativo (ver lib/ffmpeg.ts)
     "-pix_fmt",
     "yuv420p",
     "-c:a",

@@ -14,7 +14,7 @@ import {
   Wand2,
 } from "lucide-react";
 import type { Clip, SourceVideo } from "@/lib/types";
-import { loadFFmpeg, renderClip, terminateFFmpeg } from "@/lib/ffmpeg";
+import { loadFFmpeg, renderClip, terminateFFmpeg, getActiveCore } from "@/lib/ffmpeg";
 import { VideoUploader } from "@/components/VideoUploader";
 import { PreviewPanel } from "@/components/PreviewPanel";
 import { ClipCard } from "@/components/ClipCard";
@@ -39,6 +39,9 @@ export default function Page() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [peaks, setPeaks] = useState<Float32Array | null>(null);
   const [detecting, setDetecting] = useState(false);
+  const [activeCore, setActiveCore] = useState<
+    "multi-thread" | "single-thread" | null
+  >(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -118,7 +121,10 @@ export default function Page() {
     if (!source || ffmpegState !== "idle") return;
     setFfmpegState("loading");
     loadFFmpeg()
-      .then(() => setFfmpegState("ready"))
+      .then(() => {
+        setActiveCore(getActiveCore());
+        setFfmpegState("ready");
+      })
       .catch(() => setFfmpegState("error"));
   }, [source, ffmpegState]);
 
@@ -495,6 +501,7 @@ export default function Page() {
     <main className="mx-auto flex min-h-screen max-w-[1500px] flex-col px-4 py-5 lg:px-8">
       <Header
         ffmpegState={ffmpegState}
+        activeCore={activeCore}
         hasSource={!!source}
         onReset={resetSource}
         onShowShortcuts={() => setShowShortcuts(true)}
@@ -655,11 +662,13 @@ function safeName(name: string): string {
 
 function Header({
   ffmpegState,
+  activeCore,
   hasSource,
   onReset,
   onShowShortcuts,
 }: {
   ffmpegState: FFmpegState;
+  activeCore: "multi-thread" | "single-thread" | null;
   hasSource: boolean;
   onReset: () => void;
   onShowShortcuts: () => void;
@@ -677,7 +686,7 @@ function Header({
       </div>
 
       <div className="flex items-center gap-3">
-        <FFmpegStatus state={ffmpegState} />
+        <FFmpegStatus state={ffmpegState} activeCore={activeCore} />
         {hasSource && (
           <>
             <button
@@ -701,7 +710,19 @@ function Header({
   );
 }
 
-function FFmpegStatus({ state }: { state: FFmpegState }) {
+function FFmpegStatus({
+  state,
+  activeCore,
+}: {
+  state: FFmpegState;
+  activeCore: "multi-thread" | "single-thread" | null;
+}) {
+  const readyText =
+    activeCore === "multi-thread"
+      ? "Motor pronto · multi-thread ⚡"
+      : activeCore === "single-thread"
+      ? "Motor pronto · 1 núcleo"
+      : "Motor pronto";
   const map = {
     idle: { icon: CircleDashed, text: "Motor em espera", cls: "text-slate-500" },
     loading: {
@@ -709,7 +730,7 @@ function FFmpegStatus({ state }: { state: FFmpegState }) {
       text: "Carregando motor…",
       cls: "text-amber-400",
     },
-    ready: { icon: Zap, text: "Motor pronto", cls: "text-emerald-400" },
+    ready: { icon: Zap, text: readyText, cls: "text-emerald-400" },
     error: {
       icon: CircleDashed,
       text: "Falha no motor",

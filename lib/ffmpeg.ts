@@ -13,24 +13,74 @@ import {
   type AudioTreatment,
 } from "./audio-command";
 
-// Core single-thread do FFmpeg.wasm (v0.12) servido via unpkg.
-// toBlobURL baixa com CORS e cria uma blob URL same-origin — assim os
-// cabeçalhos COOP/COEP (require-corp) são respeitados.
+// FFmpeg.wasm (v0.12) servido via unpkg. toBlobURL baixa com CORS e cria uma
+// blob URL same-origin — assim os cabeçalhos COOP/COEP (require-corp) são
+// respeitados e o SharedArrayBuffer fica disponível.
 //
-// NOTA: o core multi-thread (core-mt) aceleraria o encode, mas nesta
-// configuração (core carregado via blob URL sob COEP) os workers de pthread
-// não inicializam e o encode entra em DEADLOCK — trava sem processar 1 frame.
-// Por isso usamos o core single-thread, que é confiável e conclui cortes
-// longos (5+ min). Para reduzir o tempo dos trechos longos, o encode usa
-// preset "ultrafast" (ver ffmpeg-command.ts) e o vídeo de origem é lido via
-// WORKERFS (ver renderClip), sem copiar tudo para a memória.
+// ESTRATÉGIA DE DESEMPENHO — multi-thread com fallback:
+//   1) Tentamos o core MULTI-THREAD (core-mt), que paraleliza o encode do x264
+//      em todos os núcleos → tipicamente 3–8× mais rápido.
+//   2) O deadlock histórico do core-mt vinha de NÃO passar o `workerURL` (o
+//      worker de pthread `ffmpeg-core.worker.js`): sem ele, os threads não
+//      sobem e o encode trava. Aqui passamos o workerURL explicitamente.
+//   3) Se o ambiente não estiver cross-origin isolated (sem SharedArrayBuffer),
+//      ou se a carga do core-mt pendurar/falhar, caímos automaticamente no
+//      core SINGLE-THREAD, que é confiável.
+//
+// O encode também usa preset "ultrafast" (ver ffmpeg-command.ts) e lê a origem
+// via WORKERFS (ver renderClip), sem copiar tudo para a memória.
 const CORE_VERSION = "0.12.6";
-const BASE_URL = `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/umd`;
+const MT_BASE = `https://unpkg.com/@ffmpeg/core-mt@${CORE_VERSION}/dist/umd`;
+const ST_BASE = `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/umd`;
 
 let ffmpeg: FFmpeg | null = null;
 let loadPromise: Promise<FFmpeg> | null = null;
+let activeCore: "multi-thread" | "single-thread" | null = null;
 
 export type LogHandler = (message: string) => void;
+
+/** Qual core está ativo no momento (para exibir/telemetria). */
+export function getActiveCore(): "multi-thread" | "single-thread" | null {
+  return activeCore;
+}
+
+/** Ambiente permite o core multi-thread? (SharedArrayBuffer + isolamento). */
+function multiThreadSupported(): boolean {
+  return (
+    typeof SharedArrayBuffer !== "undefined" &&
+    typeof globalThis !== "undefined" &&
+    (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true
+  );
+}
+
+/** Carrega um core específico numa instância, com timeout contra travamento. */
+async function loadCore(
+  instance: FFmpeg,
+  base: string,
+  multi: boolean,
+  timeoutMs: number
+): Promise<void> {
+  const config: { coreURL: string; wasmURL: string; workerURL?: string } = {
+    coreURL: await toBlobURL(`${base}/ffmpeg-core.js`, "text/javascript"),
+    wasmURL: await toBlobURL(`${base}/ffmpeg-core.wasm`, "application/wasm"),
+  };
+  // O core multi-thread PRECISA do seu worker de pthread — sem ele, trava.
+  if (multi) {
+    config.workerURL = await toBlobURL(
+      `${base}/ffmpeg-core.worker.js`,
+      "text/javascript"
+    );
+  }
+  await Promise.race([
+    instance.load(config),
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("timeout ao carregar o core do FFmpeg")),
+        timeoutMs
+      )
+    ),
+  ]);
+}
 
 /** Carrega (uma única vez) a instância do FFmpeg.wasm. */
 export function loadFFmpeg(onLog?: LogHandler): Promise<FFmpeg> {
@@ -38,20 +88,37 @@ export function loadFFmpeg(onLog?: LogHandler): Promise<FFmpeg> {
   if (loadPromise) return loadPromise;
 
   loadPromise = (async () => {
-    const instance = new FFmpeg();
-    if (onLog) {
-      instance.on("log", ({ message }) => onLog(message));
+    // 1) Tenta o core multi-thread (rápido) quando o ambiente suporta.
+    if (multiThreadSupported()) {
+      const mt = new FFmpeg();
+      if (onLog) mt.on("log", ({ message }) => onLog(message));
+      try {
+        await loadCore(mt, MT_BASE, true, 30000);
+        ffmpeg = mt;
+        activeCore = "multi-thread";
+        return mt;
+      } catch {
+        try {
+          mt.terminate();
+        } catch {
+          /* ignore */
+        }
+      }
     }
-    await instance.load({
-      coreURL: await toBlobURL(`${BASE_URL}/ffmpeg-core.js`, "text/javascript"),
-      wasmURL: await toBlobURL(
-        `${BASE_URL}/ffmpeg-core.wasm`,
-        "application/wasm"
-      ),
-    });
-    ffmpeg = instance;
-    return instance;
+
+    // 2) Fallback confiável: core single-thread.
+    const st = new FFmpeg();
+    if (onLog) st.on("log", ({ message }) => onLog(message));
+    await loadCore(st, ST_BASE, false, 60000);
+    ffmpeg = st;
+    activeCore = "single-thread";
+    return st;
   })();
+
+  // Se a carga falhar por completo, permite nova tentativa numa próxima chamada.
+  loadPromise.catch(() => {
+    loadPromise = null;
+  });
 
   return loadPromise;
 }
@@ -75,6 +142,7 @@ export function terminateFFmpeg(): void {
   }
   ffmpeg = null;
   loadPromise = null;
+  activeCore = null;
 }
 
 /**
