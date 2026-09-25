@@ -28,6 +28,7 @@ import {
   addFraming,
   removeFraming,
   clampFramings,
+  moveFraming,
 } from "@/lib/framing";
 
 type FFmpegState = "idle" | "loading" | "ready" | "error";
@@ -208,6 +209,15 @@ export default function Page() {
       prev.map((c) => (c.id === clipId ? removeFraming(c, t) : c))
     );
   }, []);
+
+  const moveFramingTime = useCallback(
+    (clipId: string, index: number, newT: number) => {
+      setClips((prev) =>
+        prev.map((c) => (c.id === clipId ? moveFraming(c, index, newT) : c))
+      );
+    },
+    []
+  );
 
   // Edita o crop/zoom do enquadramento ativo (no tempo atual) de um clipe.
   const updateClipFraming = useCallback(
@@ -612,6 +622,9 @@ export default function Page() {
               onAddFraming={addFramingHere}
               onRemoveFraming={(t) =>
                 activeClip && removeFramingAt(activeClip.id, t)
+              }
+              onMoveFraming={(index, newT) =>
+                activeClip && moveFramingTime(activeClip.id, index, newT)
               }
             />
           </section>

@@ -129,6 +129,21 @@ export function clampFramings(clip: Clip): Clip {
   return { ...clip, framings };
 }
 
+/**
+ * Move o tempo de um enquadramento. O índice 0 é ancorado no início do clipe e
+ * não se move; os demais ficam presos entre os vizinhos (mantém a ordem).
+ */
+export function moveFraming(clip: Clip, index: number, newT: number): Clip {
+  const fr = clip.framings;
+  if (!fr || index <= 0 || index >= fr.length) return clip;
+  const minT = fr[index - 1].t + 0.05;
+  const maxT = (index < fr.length - 1 ? fr[index + 1].t : clip.end) - 0.05;
+  const t = Math.max(minT, Math.min(newT, maxT));
+  const next = [...fr];
+  next[index] = { ...next[index], t };
+  return { ...clip, framings: next };
+}
+
 /** Segmentos de crop para renderização (>1 só quando há múltiplos enquadramentos em modo crop). */
 export function getCropSegments(clip: Clip): CropSegment[] {
   if (clip.fill !== "crop") return [];

@@ -30,6 +30,8 @@ interface PreviewPanelProps {
   onAddFraming: () => void;
   /** Remove o enquadramento que começa no tempo `t`. */
   onRemoveFraming: (t: number) => void;
+  /** Move o enquadramento de índice `index` para o tempo `newT`. */
+  onMoveFraming: (index: number, newT: number) => void;
 }
 
 export function PreviewPanel({
@@ -49,6 +51,7 @@ export function PreviewPanel({
   onUpdateActiveFraming,
   onAddFraming,
   onRemoveFraming,
+  onMoveFraming,
 }: PreviewPanelProps) {
   const sourceAR = source.width / source.height;
   // No modo "Original" (corte rápido) não há conversão de formato → sem máscara.
@@ -259,6 +262,7 @@ export function PreviewPanel({
           duration={duration}
           peaks={peaks}
           onSeek={onSeek}
+          onMoveFraming={onMoveFraming}
         />
 
         {activeClip && (

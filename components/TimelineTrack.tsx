@@ -15,6 +15,8 @@ interface TimelineTrackProps {
   /** Picos de áudio normalizados (0..1) para a waveform; null enquanto calcula. */
   peaks: Float32Array | null;
   onSeek: (t: number) => void;
+  /** Move o enquadramento de índice `index` para o tempo `newT`. */
+  onMoveFraming: (index: number, newT: number) => void;
 }
 
 /**
@@ -30,12 +32,15 @@ export function TimelineTrack({
   duration,
   peaks,
   onSeek,
+  onMoveFraming,
 }: TimelineTrackProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const trackRef = useRef<HTMLDivElement | null>(null);
   const [thumbs, setThumbs] = useState<Thumbnail[]>([]);
   const [hover, setHover] = useState<{ x: number; time: number } | null>(null);
   const hasWave = !!peaks && peaks.length > 0;
+  // Índice do marcador de enquadramento sendo arrastado (null = nenhum).
+  const draggingFramingRef = useRef<number | null>(null);
 
   // ---- Gera as miniaturas em segundo plano ----
   useEffect(() => {
@@ -107,6 +112,33 @@ export function TimelineTrack({
     return frac * duration;
   };
 
+  // --- Arraste dos marcadores de enquadramento ---
+  const startFramingDrag = (index: number) => (e: React.PointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    draggingFramingRef.current = index;
+    try {
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      /* noop */
+    }
+  };
+  const moveFramingDrag = (e: React.PointerEvent) => {
+    if (draggingFramingRef.current === null) return;
+    e.stopPropagation();
+    onMoveFraming(draggingFramingRef.current, timeFromEvent(e.clientX));
+  };
+  const endFramingDrag = (e: React.PointerEvent) => {
+    if (draggingFramingRef.current === null) return;
+    e.stopPropagation();
+    draggingFramingRef.current = null;
+    try {
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      /* noop */
+    }
+  };
+
   const nearestThumb = (time: number): Thumbnail | null => {
     if (thumbs.length === 0) return null;
     let best = thumbs[0];
@@ -158,6 +190,7 @@ export function TimelineTrack({
         ref={trackRef}
         className="relative h-14 w-full cursor-pointer overflow-hidden rounded-lg bg-panel"
         onMouseMove={(e) => {
+          if (draggingFramingRef.current !== null) return; // não sobrepõe o arraste
           const rect = trackRef.current!.getBoundingClientRect();
           setHover({
             x: e.clientX - rect.left,
@@ -165,7 +198,10 @@ export function TimelineTrack({
           });
         }}
         onMouseLeave={() => setHover(null)}
-        onClick={(e) => onSeek(timeFromEvent(e.clientX))}
+        onClick={(e) => {
+          if (draggingFramingRef.current !== null) return;
+          onSeek(timeFromEvent(e.clientX));
+        }}
       >
         <canvas
           ref={canvasRef}
@@ -192,22 +228,47 @@ export function TimelineTrack({
             );
           })}
 
-        {/* Marcadores de enquadramento (troca de câmera) do clipe ativo */}
+        {/* Marcadores de enquadramento (troca de câmera) do clipe ativo.
+            O 1º fica ancorado no início; os demais podem ser arrastados. */}
         {duration > 0 &&
           activeClip?.framings &&
           activeClip.framings.length > 1 &&
-          activeClip.framings.map((f, i) => (
-            <div
-              key={`fr-${f.t}-${i}`}
-              className="pointer-events-none absolute bottom-0 top-0 w-px bg-amber-400/90"
-              style={{ left: `${(f.t / duration) * 100}%` }}
-              title={`Enquadramento ${i + 1}`}
-            >
-              <span className="absolute -top-0.5 left-0 flex h-3 w-3 -translate-x-1/2 items-center justify-center rounded-sm bg-amber-400 text-[8px] font-bold text-black">
-                {i + 1}
-              </span>
-            </div>
-          ))}
+          activeClip.framings.map((f, i) => {
+            const anchored = i === 0;
+            return (
+              <div
+                key={`fr-${i}`}
+                className={`absolute bottom-0 top-0 w-px bg-amber-400/90 ${
+                  anchored ? "pointer-events-none" : ""
+                }`}
+                style={{ left: `${(f.t / duration) * 100}%` }}
+                title={
+                  anchored
+                    ? `Enquadramento 1 (início)`
+                    : `Enquadramento ${i + 1} — arraste para ajustar`
+                }
+              >
+                {anchored ? (
+                  <span className="absolute -top-0.5 left-0 flex h-3 w-3 -translate-x-1/2 items-center justify-center rounded-sm bg-amber-400 text-[8px] font-bold text-black">
+                    {i + 1}
+                  </span>
+                ) : (
+                  // Alça de arraste (área maior, invisível) sobre o marcador.
+                  <div
+                    onPointerDown={startFramingDrag(i)}
+                    onPointerMove={moveFramingDrag}
+                    onPointerUp={endFramingDrag}
+                    onClick={(e) => e.stopPropagation()}
+                    className="absolute -top-1 bottom-0 left-0 w-3 -translate-x-1/2 cursor-ew-resize touch-none"
+                  >
+                    <span className="absolute top-0.5 left-1/2 flex h-3 w-3 -translate-x-1/2 items-center justify-center rounded-sm bg-amber-400 text-[8px] font-bold text-black">
+                      {i + 1}
+                    </span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
 
         {/* Cabeçote de reprodução */}
         <div
