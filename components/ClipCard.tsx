@@ -19,6 +19,7 @@ import {
 import type { Clip } from "@/lib/types";
 import { ASPECT_PRESETS, FILL_PRESETS } from "@/lib/presets";
 import { formatTime, parseTime } from "@/lib/time";
+import { getFramingAt } from "@/lib/framing";
 import { DualRangeSlider } from "./DualRangeSlider";
 
 interface ClipCardProps {
@@ -29,6 +30,9 @@ interface ClipCardProps {
   isActive: boolean;
   onSelect: () => void;
   onUpdate: (patch: Partial<Clip>) => void;
+  onUpdateFraming: (
+    patch: Partial<{ cropX: number; cropY: number; zoom: number }>
+  ) => void;
   onRemove: () => void;
   onDuplicate: () => void;
   onRender: () => void;
@@ -44,6 +48,7 @@ export function ClipCard({
   isActive,
   onSelect,
   onUpdate,
+  onUpdateFraming,
   onRemove,
   onDuplicate,
   onRender,
@@ -51,6 +56,9 @@ export function ClipCard({
   onSeek,
 }: ClipCardProps) {
   const isOriginal = clip.aspect === "original";
+  // Zoom exibido/editado é o do enquadramento ativo no tempo atual (multicâmera).
+  const activeZoom = getFramingAt(clip, currentTime).zoom;
+  const framingCount = clip.framings?.length ?? 1;
   return (
     <div
       onClick={onSelect}
@@ -196,9 +204,14 @@ export function ClipCard({
           <div className="mb-1.5 flex items-center justify-between">
             <span className="flex items-center gap-1 text-xs font-medium text-slate-300">
               <ZoomIn className="h-3.5 w-3.5 text-brand" /> Enquadramento
+              {framingCount > 1 && (
+                <span className="ml-1 rounded bg-amber-400/20 px-1 text-[9px] font-semibold text-amber-400">
+                  {framingCount} câmeras
+                </span>
+              )}
             </span>
             <button
-              onClick={() => onUpdate({ cropX: 0.5, cropY: 0.5, zoom: 1 })}
+              onClick={() => onUpdateFraming({ cropX: 0.5, cropY: 0.5, zoom: 1 })}
               className="flex items-center gap-1 text-[10px] text-slate-400 transition-colors hover:text-white"
             >
               <Crosshair className="h-3 w-3" /> Centralizar
@@ -211,19 +224,21 @@ export function ClipCard({
               min={1}
               max={3}
               step={0.05}
-              value={clip.zoom}
+              value={activeZoom}
               onChange={(e) =>
-                onUpdate({ zoom: parseFloat(e.target.value) })
+                onUpdateFraming({ zoom: parseFloat(e.target.value) })
               }
               className="h-4 flex-1"
               aria-label="Zoom do recorte"
             />
             <span className="w-9 text-right font-mono text-[11px] text-slate-300">
-              {clip.zoom.toFixed(1)}x
+              {activeZoom.toFixed(1)}x
             </span>
           </div>
           <p className="mt-1.5 text-[10px] leading-tight text-slate-500">
-            Arraste a caixa no preview para escolher a área do vídeo.
+            {framingCount > 1
+              ? "Ajustando o enquadramento do trecho atual. Arraste a caixa no preview."
+              : "Arraste a caixa no preview para escolher a área do vídeo."}
           </p>
         </div>
       )}

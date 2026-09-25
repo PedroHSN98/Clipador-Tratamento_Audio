@@ -17,6 +17,7 @@ import {
   renderClipWebCodecs,
   WebCodecsCanceledError,
 } from "./webcodecs-render";
+import { getCropSegments } from "./framing";
 
 // FFmpeg.wasm (v0.12) servido via unpkg. toBlobURL baixa com CORS e cria uma
 // blob URL same-origin — assim os cabeçalhos COOP/COEP (require-corp) são
@@ -162,11 +163,28 @@ export interface RenderResult {
 }
 
 /**
- * Renderiza um clipe escolhendo o caminho mais rápido disponível:
+ * Renderiza um clipe. Se houver múltiplos enquadramentos (multicâmera), divide
+ * em segmentos, renderiza cada um (rápido, por WebCodecs quando possível) e
+ * concatena tudo num vídeo só. Caso contrário, renderiza de uma vez.
+ */
+export async function renderClip(params: {
+  source: SourceVideo;
+  clip: Clip;
+  onProgress?: (progress: number) => void;
+}): Promise<RenderResult> {
+  const segments = getCropSegments(params.clip);
+  if (segments.length > 1) {
+    return renderSegmentedClip(params, segments);
+  }
+  return renderSingleClip(params);
+}
+
+/**
+ * Renderiza um trecho único escolhendo o caminho mais rápido:
  *  1) WebCodecs (encoder de HARDWARE) quando elegível (crop/fit) e suportado;
  *  2) FFmpeg.wasm como fallback (blur, modo "original", ou sem WebCodecs).
  */
-export async function renderClip(params: {
+async function renderSingleClip(params: {
   source: SourceVideo;
   clip: Clip;
   onProgress?: (progress: number) => void;
@@ -182,6 +200,118 @@ export async function renderClip(params: {
     }
   }
   return renderClipFFmpeg(params);
+}
+
+/** Renderiza cada segmento (com seu enquadramento) e concatena num vídeo só. */
+async function renderSegmentedClip(
+  params: {
+    source: SourceVideo;
+    clip: Clip;
+    onProgress?: (progress: number) => void;
+  },
+  segments: ReturnType<typeof getCropSegments>
+): Promise<RenderResult> {
+  const { source, clip, onProgress } = params;
+  const parts: Uint8Array[] = [];
+  const urls: string[] = [];
+  try {
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
+      const subClip: Clip = {
+        ...clip,
+        start: seg.start,
+        end: seg.end,
+        cropX: seg.cropX,
+        cropY: seg.cropY,
+        zoom: seg.zoom,
+        framings: undefined, // segmento tem crop fixo
+      };
+      const { url } = await renderSingleClip({
+        source,
+        clip: subClip,
+        onProgress: (p) =>
+          onProgress?.(
+            Math.round(((i + p / 100) / segments.length) * 95)
+          ),
+      });
+      urls.push(url);
+      const buf = await (await fetch(url)).arrayBuffer();
+      parts.push(new Uint8Array(buf));
+    }
+
+    onProgress?.(96); // fase de junção
+    const outBytes = await concatMp4(parts);
+    onProgress?.(100);
+    const blob = new Blob([outBytes.slice()], { type: "video/mp4" });
+    return { url: URL.createObjectURL(blob), ext: "mp4" };
+  } finally {
+    urls.forEach((u) => URL.revokeObjectURL(u));
+  }
+}
+
+/** Junta vários MP4 (mesmo codec/resolução) num só — tenta -c copy, senão reencoda. */
+async function concatMp4(parts: Uint8Array[]): Promise<Uint8Array> {
+  const instance = await loadFFmpeg();
+  const names = parts.map((_, i) => `seg-${i}.mp4`);
+  for (let i = 0; i < parts.length; i++) {
+    await instance.writeFile(names[i], parts[i]);
+  }
+  const listName = "concat-list.txt";
+  const list = names.map((n) => `file '${n}'`).join("\n");
+  await instance.writeFile(listName, new TextEncoder().encode(list));
+  const out = "concat-out.mp4";
+
+  const baseArgs = ["-f", "concat", "-safe", "0", "-i", listName];
+  // 1) tentativa rápida: sem reencode.
+  let code = await instance.exec([
+    ...baseArgs,
+    "-c",
+    "copy",
+    "-movflags",
+    "+faststart",
+    out,
+  ]);
+  if (code !== 0) {
+    // 2) fallback: reencoda a junção (mais lento, porém robusto).
+    await safeDelete(instance, out);
+    code = await instance.exec([
+      ...baseArgs,
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-crf",
+      "23",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "128k",
+      "-movflags",
+      "+faststart",
+      out,
+    ]);
+  }
+
+  let bytes: Uint8Array | null = null;
+  if (code === 0) {
+    try {
+      bytes = (await instance.readFile(out)) as Uint8Array;
+    } catch {
+      bytes = null;
+    }
+  }
+
+  // Limpeza do FS virtual.
+  for (const n of names) await safeDelete(instance, n);
+  await safeDelete(instance, listName);
+  await safeDelete(instance, out);
+
+  if (!bytes || bytes.byteLength < 1024) {
+    throw new Error("Falha ao juntar os enquadramentos do clipe.");
+  }
+  return bytes;
 }
 
 async function renderClipFFmpeg(params: {

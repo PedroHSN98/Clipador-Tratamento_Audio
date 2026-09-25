@@ -36,6 +36,7 @@ interface StoredClip {
   cropX: number;
   cropY: number;
   zoom: number;
+  framings?: Clip["framings"];
 }
 
 interface StoredProject {
@@ -97,6 +98,7 @@ function toStoredClip(c: Clip): StoredClip {
     cropX: c.cropX,
     cropY: c.cropY,
     zoom: c.zoom,
+    framings: c.framings,
   };
 }
 

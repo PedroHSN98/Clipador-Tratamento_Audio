@@ -18,6 +18,15 @@ export interface FillModePreset {
   hint: string;
 }
 
+/** Um enquadramento (crop) que passa a valer a partir do tempo `t`. Ver lib/framing.ts. */
+export interface Framing {
+  /** Tempo absoluto no vídeo de origem (s) em que este enquadramento passa a valer. */
+  t: number;
+  cropX: number;
+  cropY: number;
+  zoom: number;
+}
+
 export type ClipStatus =
   | "idle"
   | "queued"
@@ -40,6 +49,12 @@ export interface Clip {
   cropY: number;
   /** Zoom do recorte (>= 1). 1 = enquadramento padrão. Só afeta o modo "crop". */
   zoom: number;
+  /**
+   * Enquadramentos por trecho (multicâmera). Quando presente (>=2), o crop muda
+   * em cada tempo `t` com corte seco. Ausente = usa o crop base acima. Ver
+   * lib/framing.ts. Só afeta o modo "crop".
+   */
+  framings?: Framing[];
   status: ClipStatus;
   /** 0..100 */
   progress: number;

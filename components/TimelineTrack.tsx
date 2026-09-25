@@ -8,6 +8,7 @@ import { formatTime } from "@/lib/time";
 interface TimelineTrackProps {
   source: SourceVideo;
   clips: Clip[];
+  activeClip: Clip | null;
   activeClipId: string | null;
   currentTime: number;
   duration: number;
@@ -23,6 +24,7 @@ interface TimelineTrackProps {
 export function TimelineTrack({
   source,
   clips,
+  activeClip,
   activeClipId,
   currentTime,
   duration,
@@ -189,6 +191,23 @@ export function TimelineTrack({
               />
             );
           })}
+
+        {/* Marcadores de enquadramento (troca de câmera) do clipe ativo */}
+        {duration > 0 &&
+          activeClip?.framings &&
+          activeClip.framings.length > 1 &&
+          activeClip.framings.map((f, i) => (
+            <div
+              key={`fr-${f.t}-${i}`}
+              className="pointer-events-none absolute bottom-0 top-0 w-px bg-amber-400/90"
+              style={{ left: `${(f.t / duration) * 100}%` }}
+              title={`Enquadramento ${i + 1}`}
+            >
+              <span className="absolute -top-0.5 left-0 flex h-3 w-3 -translate-x-1/2 items-center justify-center rounded-sm bg-amber-400 text-[8px] font-bold text-black">
+                {i + 1}
+              </span>
+            </div>
+          ))}
 
         {/* Cabeçote de reprodução */}
         <div

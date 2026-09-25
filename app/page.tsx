@@ -23,6 +23,12 @@ import { saveProject, loadProject, clearProject } from "@/lib/storage";
 import { computeWaveform } from "@/lib/waveform";
 import { detectSegments } from "@/lib/auto-detect";
 import { cancelWebCodecs, webCodecsSupported } from "@/lib/webcodecs-render";
+import {
+  applyFramingPatch,
+  addFraming,
+  removeFraming,
+  clampFramings,
+} from "@/lib/framing";
 
 type FFmpegState = "idle" | "loading" | "ready" | "error";
 
@@ -163,9 +169,59 @@ export default function Page() {
 
   const updateClip = useCallback((id: string, patch: Partial<Clip>) => {
     setClips((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, ...patch } : c))
+      prev.map((c) => {
+        if (c.id !== id) return c;
+        let next = { ...c, ...patch };
+        // Ao mexer no início/fim, reancora os enquadramentos ao novo intervalo.
+        if (patch.start !== undefined || patch.end !== undefined) {
+          next = clampFramings(next);
+        }
+        return next;
+      })
     );
   }, []);
+
+  // ---- Enquadramentos por trecho (multicâmera) ----
+  const updateActiveFraming = useCallback(
+    (patch: Partial<{ cropX: number; cropY: number; zoom: number }>) => {
+      const id = activeClipIdRef.current;
+      if (!id) return;
+      const t = currentTimeRef.current;
+      setClips((prev) =>
+        prev.map((c) => (c.id === id ? applyFramingPatch(c, t, patch) : c))
+      );
+    },
+    []
+  );
+
+  const addFramingHere = useCallback(() => {
+    const id = activeClipIdRef.current;
+    if (!id) return;
+    const t = currentTimeRef.current;
+    setClips((prev) =>
+      prev.map((c) => (c.id === id ? addFraming(c, t) : c))
+    );
+  }, []);
+
+  const removeFramingAt = useCallback((clipId: string, t: number) => {
+    setClips((prev) =>
+      prev.map((c) => (c.id === clipId ? removeFraming(c, t) : c))
+    );
+  }, []);
+
+  // Edita o crop/zoom do enquadramento ativo (no tempo atual) de um clipe.
+  const updateClipFraming = useCallback(
+    (
+      clipId: string,
+      patch: Partial<{ cropX: number; cropY: number; zoom: number }>
+    ) => {
+      const t = currentTimeRef.current;
+      setClips((prev) =>
+        prev.map((c) => (c.id === clipId ? applyFramingPatch(c, t, patch) : c))
+      );
+    },
+    []
+  );
 
   const duplicateClip = useCallback((id: string) => {
     setClips((prev) => {
@@ -552,8 +608,10 @@ export default function Page() {
               onTimeUpdate={setCurrentTime}
               onDurationChange={setDuration}
               onPlayStateChange={setIsPlaying}
-              onUpdateActiveClip={(patch) =>
-                activeClip && updateClip(activeClip.id, patch)
+              onUpdateActiveFraming={updateActiveFraming}
+              onAddFraming={addFramingHere}
+              onRemoveFraming={(t) =>
+                activeClip && removeFramingAt(activeClip.id, t)
               }
             />
           </section>
@@ -635,6 +693,7 @@ export default function Page() {
                   isActive={clip.id === activeClipId}
                   onSelect={() => setActiveClipId(clip.id)}
                   onUpdate={(patch) => updateClip(clip.id, patch)}
+                  onUpdateFraming={(patch) => updateClipFraming(clip.id, patch)}
                   onRemove={() => removeClip(clip.id)}
                   onDuplicate={() => duplicateClip(clip.id)}
                   onRender={() => renderOne(clip.id)}

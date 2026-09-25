@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { Play, Pause, RotateCcw, Scissors, Move } from "lucide-react";
+import { Play, Pause, RotateCcw, Scissors, Move, Camera, Plus, X } from "lucide-react";
 import type { Clip, SourceVideo } from "@/lib/types";
 import { getAspect } from "@/lib/presets";
 import { formatTime } from "@/lib/time";
+import { getFramingAt, activeFramingIndex } from "@/lib/framing";
 import { TimelineTrack } from "./TimelineTrack";
 
 interface PreviewPanelProps {
@@ -21,7 +22,14 @@ interface PreviewPanelProps {
   onTimeUpdate: (t: number) => void;
   onDurationChange: (d: number) => void;
   onPlayStateChange: (playing: boolean) => void;
-  onUpdateActiveClip: (patch: Partial<Clip>) => void;
+  /** Atualiza o crop do enquadramento ativo no tempo atual. */
+  onUpdateActiveFraming: (
+    patch: Partial<{ cropX: number; cropY: number; zoom: number }>
+  ) => void;
+  /** Adiciona um enquadramento no tempo atual. */
+  onAddFraming: () => void;
+  /** Remove o enquadramento que começa no tempo `t`. */
+  onRemoveFraming: (t: number) => void;
 }
 
 export function PreviewPanel({
@@ -38,7 +46,9 @@ export function PreviewPanel({
   onTimeUpdate,
   onDurationChange,
   onPlayStateChange,
-  onUpdateActiveClip,
+  onUpdateActiveFraming,
+  onAddFraming,
+  onRemoveFraming,
 }: PreviewPanelProps) {
   const sourceAR = source.width / source.height;
   // No modo "Original" (corte rápido) não há conversão de formato → sem máscara.
@@ -48,9 +58,13 @@ export function PreviewPanel({
       : null;
   const frameRef = useRef<HTMLDivElement | null>(null);
 
-  const cropX = activeClip?.cropX ?? 0.5;
-  const cropY = activeClip?.cropY ?? 0.5;
-  const zoom = Math.max(1, activeClip?.zoom ?? 1);
+  // Crop do enquadramento ativo no tempo atual (multicâmera).
+  const activeFraming = activeClip
+    ? getFramingAt(activeClip, currentTime)
+    : { cropX: 0.5, cropY: 0.5, zoom: 1 };
+  const cropX = activeFraming.cropX;
+  const cropY = activeFraming.cropY;
+  const zoom = Math.max(1, activeFraming.zoom);
 
   // Região aproveitada (modo crop) em frações do frame: posição + tamanho.
   const cropRect = useMemo(() => {
@@ -103,12 +117,12 @@ export function PreviewPanel({
       const availH = 1 - cropRect.h;
       const newLeft = clamp(drag.startLeft + dxFrac, 0, availW);
       const newTop = clamp(drag.startTop + dyFrac, 0, availH);
-      onUpdateActiveClip({
+      onUpdateActiveFraming({
         cropX: availW > 0 ? newLeft / availW : 0.5,
         cropY: availH > 0 ? newTop / availH : 0.5,
       });
     },
-    [cropRect, onUpdateActiveClip]
+    [cropRect, onUpdateActiveFraming]
   );
 
   const handlePointerUp = useCallback((e: React.PointerEvent) => {
@@ -235,10 +249,11 @@ export function PreviewPanel({
           </div>
         </div>
 
-        {/* Timeline com waveform, faixas dos clipes e prévia em miniatura */}
+        {/* Timeline com waveform, faixas dos clipes, prévia e enquadramentos */}
         <TimelineTrack
           source={source}
           clips={clips}
+          activeClip={activeClip}
           activeClipId={activeClip?.id ?? null}
           currentTime={currentTime}
           duration={duration}
@@ -258,6 +273,19 @@ export function PreviewPanel({
             </span>
           </div>
         )}
+
+        {/* Enquadramentos por trecho (multicâmera) — só no modo Crop */}
+        {activeClip &&
+          activeClip.fill === "crop" &&
+          activeClip.aspect !== "original" && (
+            <FramingControls
+              clip={activeClip}
+              currentTime={currentTime}
+              onAdd={onAddFraming}
+              onRemove={onRemoveFraming}
+              onSeek={onSeek}
+            />
+          )}
       </div>
     </div>
   );
@@ -303,4 +331,88 @@ function MaskShades({
 
 function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
+}
+
+/**
+ * Painel de enquadramentos por trecho (troca de câmera): lista os pontos de
+ * enquadramento do clipe, permite ir até cada um, adicionar no tempo atual e
+ * remover. Os marcadores também aparecem na timeline (ver TimelineTrack).
+ */
+function FramingControls({
+  clip,
+  currentTime,
+  onAdd,
+  onRemove,
+  onSeek,
+}: {
+  clip: Clip;
+  currentTime: number;
+  onAdd: () => void;
+  onRemove: (t: number) => void;
+  onSeek: (t: number) => void;
+}) {
+  const framings =
+    clip.framings ?? [
+      { t: clip.start, cropX: clip.cropX, cropY: clip.cropY, zoom: clip.zoom },
+    ];
+  const activeIdx = Math.max(0, activeFramingIndex(clip, currentTime));
+
+  return (
+    <div className="mt-3 rounded-lg border border-edge bg-panel p-2.5">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="flex items-center gap-1.5 text-xs font-medium text-slate-300">
+          <Camera className="h-3.5 w-3.5 text-brand" />
+          Enquadramentos (câmeras)
+        </span>
+        <button
+          onClick={onAdd}
+          className="flex items-center gap-1 rounded-md bg-brand px-2 py-1 text-[11px] font-medium text-white transition-colors hover:bg-brand-hover"
+          title="Cria um enquadramento a partir do tempo atual do player"
+        >
+          <Plus className="h-3 w-3" /> Adicionar no tempo atual
+        </button>
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {framings.map((f, i) => {
+          const isActive = i === activeIdx;
+          return (
+            <span
+              key={`${f.t}-${i}`}
+              className={[
+                "flex items-center gap-1 rounded-md border px-1.5 py-1 text-[11px] transition-colors",
+                isActive
+                  ? "border-brand bg-brand-soft text-white"
+                  : "border-edge bg-panel-lighter text-slate-300",
+              ].join(" ")}
+            >
+              <button
+                onClick={() => onSeek(f.t)}
+                className="font-mono"
+                title="Ir para este enquadramento"
+              >
+                {i + 1} · {formatTime(f.t)}
+              </button>
+              {framings.length > 1 && (
+                <button
+                  onClick={() => onRemove(f.t)}
+                  className="text-slate-500 transition-colors hover:text-red-400"
+                  title="Remover enquadramento"
+                  aria-label="Remover enquadramento"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </span>
+          );
+        })}
+      </div>
+
+      <p className="mt-1.5 text-[10px] leading-tight text-slate-500">
+        Vá até a troca de câmera, clique em “Adicionar no tempo atual” e
+        reposicione a caixa no preview. Cada trecho mantém seu enquadramento até
+        o próximo (corte seco).
+      </p>
+    </div>
+  );
 }
