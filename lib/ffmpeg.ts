@@ -17,18 +17,18 @@ import {
 // blob URL same-origin — assim os cabeçalhos COOP/COEP (require-corp) são
 // respeitados e o SharedArrayBuffer fica disponível.
 //
-// ESTRATÉGIA DE DESEMPENHO — multi-thread com fallback:
-//   1) Tentamos o core MULTI-THREAD (core-mt), que paraleliza o encode do x264
-//      em todos os núcleos → tipicamente 3–8× mais rápido.
-//   2) O deadlock histórico do core-mt vinha de NÃO passar o `workerURL` (o
-//      worker de pthread `ffmpeg-core.worker.js`): sem ele, os threads não
-//      sobem e o encode trava. Aqui passamos o workerURL explicitamente.
-//   3) Se o ambiente não estiver cross-origin isolated (sem SharedArrayBuffer),
-//      ou se a carga do core-mt pendurar/falhar, caímos automaticamente no
-//      core SINGLE-THREAD, que é confiável.
+// ESTRATÉGIA DE DESEMPENHO — core single-thread confiável (mt desativado):
+//   Tentamos habilitar o core MULTI-THREAD (core-mt) passando o workerURL, mas
+//   neste ambiente (core carregado via blob URL sob COEP require-corp) o ENCODE
+//   entra em DEADLOCK: o core-mt carrega, porém o exec trava em 0% e nunca
+//   avança. Passar o workerURL corrige a CARGA, não o encode.
+//   Por isso ENABLE_MULTITHREAD fica FALSE por padrão: melhor lento e confiável
+//   do que pendurado para sempre. Para o ganho de velocidade real em conversões
+//   (ex.: 9:16) o caminho é WebCodecs (encoder de hardware).
 //
-// O encode também usa preset "ultrafast" (ver ffmpeg-command.ts) e lê a origem
-// via WORKERFS (ver renderClip), sem copiar tudo para a memória.
+// O encode usa preset "ultrafast" (ver ffmpeg-command.ts) e lê a origem via
+// WORKERFS (ver renderClip), sem copiar tudo para a memória.
+const ENABLE_MULTITHREAD = false;
 const CORE_VERSION = "0.12.6";
 const MT_BASE = `https://unpkg.com/@ffmpeg/core-mt@${CORE_VERSION}/dist/umd`;
 const ST_BASE = `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/umd`;
@@ -88,8 +88,9 @@ export function loadFFmpeg(onLog?: LogHandler): Promise<FFmpeg> {
   if (loadPromise) return loadPromise;
 
   loadPromise = (async () => {
-    // 1) Tenta o core multi-thread (rápido) quando o ambiente suporta.
-    if (multiThreadSupported()) {
+    // 1) Tenta o core multi-thread (rápido) quando habilitado e suportado.
+    //    Desativado por padrão: veja ENABLE_MULTITHREAD (deadlock no encode).
+    if (ENABLE_MULTITHREAD && multiThreadSupported()) {
       const mt = new FFmpeg();
       if (onLog) mt.on("log", ({ message }) => onLog(message));
       try {

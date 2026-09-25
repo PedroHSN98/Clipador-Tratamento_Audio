@@ -38,6 +38,9 @@ export default function Page() {
   const [restored, setRestored] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [peaks, setPeaks] = useState<Float32Array | null>(null);
+  const [audioStatus, setAudioStatus] = useState<
+    "analyzing" | "ready" | "off"
+  >("analyzing");
   const [detecting, setDetecting] = useState(false);
   const [activeCore, setActiveCore] = useState<
     "multi-thread" | "single-thread" | null
@@ -104,12 +107,23 @@ export default function Page() {
   useEffect(() => {
     if (!source) {
       setPeaks(null);
+      setAudioStatus("off");
+      return;
+    }
+    // Em vídeos longos, decodificar o áudio inteiro é pesado e concorre com o
+    // render; acima de ~25 min pulamos a waveform (a timeline segue funcionando).
+    if (source.duration > 1500) {
+      setPeaks(null);
+      setAudioStatus("off");
       return;
     }
     let active = true;
     setPeaks(null);
+    setAudioStatus("analyzing");
     computeWaveform(source.file, 900).then((wf) => {
-      if (active) setPeaks(wf?.peaks ?? null);
+      if (!active) return;
+      setPeaks(wf?.peaks ?? null);
+      setAudioStatus(wf?.peaks ? "ready" : "off");
     });
     return () => {
       active = false;
@@ -551,23 +565,27 @@ export default function Page() {
             </div>
 
             {/* Detecção automática de cortes */}
-            <button
-              onClick={autoDetect}
-              disabled={detecting || !peaks}
-              title={
-                peaks
-                  ? "Sugere clipes automaticamente a partir dos trechos com áudio"
-                  : "Analisando o áudio…"
-              }
-              className="mb-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-accent/50 bg-accent/10 px-2 py-2 text-xs font-medium text-accent transition-colors hover:bg-accent/20 disabled:opacity-40"
-            >
-              {detecting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Wand2 className="h-3.5 w-3.5" />
-              )}
-              {peaks ? "Detectar cortes automaticamente" : "Analisando áudio…"}
-            </button>
+            {audioStatus !== "off" && (
+              <button
+                onClick={autoDetect}
+                disabled={detecting || audioStatus !== "ready"}
+                title={
+                  audioStatus === "ready"
+                    ? "Sugere clipes automaticamente a partir dos trechos com áudio"
+                    : "Analisando o áudio…"
+                }
+                className="mb-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-accent/50 bg-accent/10 px-2 py-2 text-xs font-medium text-accent transition-colors hover:bg-accent/20 disabled:opacity-40"
+              >
+                {detecting || audioStatus === "analyzing" ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Wand2 className="h-3.5 w-3.5" />
+                )}
+                {audioStatus === "ready"
+                  ? "Detectar cortes automaticamente"
+                  : "Analisando áudio…"}
+              </button>
+            )}
 
             {/* Ações em lote */}
             <div className="mb-4 grid grid-cols-2 gap-2">
