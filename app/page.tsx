@@ -22,6 +22,7 @@ import { ShortcutsHelp } from "@/components/ShortcutsHelp";
 import { saveProject, loadProject, clearProject } from "@/lib/storage";
 import { computeWaveform } from "@/lib/waveform";
 import { detectSegments } from "@/lib/auto-detect";
+import { cancelWebCodecs, webCodecsSupported } from "@/lib/webcodecs-render";
 
 type FFmpegState = "idle" | "loading" | "ready" | "error";
 
@@ -45,6 +46,7 @@ export default function Page() {
   const [activeCore, setActiveCore] = useState<
     "multi-thread" | "single-thread" | null
   >(null);
+  const [hwAccel, setHwAccel] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -72,6 +74,11 @@ export default function Page() {
       setClips([first]);
       setActiveClipId(first.id);
     };
+  }, []);
+
+  // Detecta suporte a WebCodecs (encode por hardware) no cliente.
+  useEffect(() => {
+    setHwAccel(webCodecsSupported());
   }, []);
 
   // ---- Restauração do projeto salvo (uma vez, ao montar) ----
@@ -326,9 +333,10 @@ export default function Page() {
     (id: string) => {
       cancelIdRef.current = id;
       stopBatchRef.current = true;
-      // Encerra o worker do FFmpeg (aborta o exec em andamento).
-      terminateFFmpeg();
-      // Reaquece o motor para o próximo render.
+      // Cancela o caminho ativo — não sabemos qual está rodando:
+      cancelWebCodecs(); // conversão por hardware, se houver
+      terminateFFmpeg(); // worker do FFmpeg.wasm, se houver
+      // Reaquece o motor do FFmpeg para o próximo render.
       setFfmpegState("idle");
     },
     []
@@ -516,6 +524,7 @@ export default function Page() {
       <Header
         ffmpegState={ffmpegState}
         activeCore={activeCore}
+        hwAccel={hwAccel}
         hasSource={!!source}
         onReset={resetSource}
         onShowShortcuts={() => setShowShortcuts(true)}
@@ -681,12 +690,14 @@ function safeName(name: string): string {
 function Header({
   ffmpegState,
   activeCore,
+  hwAccel,
   hasSource,
   onReset,
   onShowShortcuts,
 }: {
   ffmpegState: FFmpegState;
   activeCore: "multi-thread" | "single-thread" | null;
+  hwAccel: boolean;
   hasSource: boolean;
   onReset: () => void;
   onShowShortcuts: () => void;
@@ -704,7 +715,11 @@ function Header({
       </div>
 
       <div className="flex items-center gap-3">
-        <FFmpegStatus state={ffmpegState} activeCore={activeCore} />
+        <FFmpegStatus
+          state={ffmpegState}
+          activeCore={activeCore}
+          hwAccel={hwAccel}
+        />
         {hasSource && (
           <>
             <button
@@ -731,16 +746,20 @@ function Header({
 function FFmpegStatus({
   state,
   activeCore,
+  hwAccel,
 }: {
   state: FFmpegState;
   activeCore: "multi-thread" | "single-thread" | null;
+  hwAccel: boolean;
 }) {
-  const readyText =
-    activeCore === "multi-thread"
-      ? "Motor pronto · multi-thread ⚡"
-      : activeCore === "single-thread"
-      ? "Motor pronto · 1 núcleo"
-      : "Motor pronto";
+  // Com WebCodecs, a maioria dos cortes usa o encoder de hardware (rápido).
+  const readyText = hwAccel
+    ? "Motor pronto · hardware ⚡"
+    : activeCore === "multi-thread"
+    ? "Motor pronto · multi-thread ⚡"
+    : activeCore === "single-thread"
+    ? "Motor pronto · 1 núcleo"
+    : "Motor pronto";
   const map = {
     idle: { icon: CircleDashed, text: "Motor em espera", cls: "text-slate-500" },
     loading: {

@@ -12,6 +12,11 @@ import {
   AUDIO_FORMAT_INFO,
   type AudioTreatment,
 } from "./audio-command";
+import {
+  canUseWebCodecs,
+  renderClipWebCodecs,
+  WebCodecsCanceledError,
+} from "./webcodecs-render";
 
 // FFmpeg.wasm (v0.12) servido via unpkg. toBlobURL baixa com CORS e cria uma
 // blob URL same-origin — assim os cabeçalhos COOP/COEP (require-corp) são
@@ -156,7 +161,30 @@ export interface RenderResult {
   ext: string;
 }
 
+/**
+ * Renderiza um clipe escolhendo o caminho mais rápido disponível:
+ *  1) WebCodecs (encoder de HARDWARE) quando elegível (crop/fit) e suportado;
+ *  2) FFmpeg.wasm como fallback (blur, modo "original", ou sem WebCodecs).
+ */
 export async function renderClip(params: {
+  source: SourceVideo;
+  clip: Clip;
+  onProgress?: (progress: number) => void;
+}): Promise<RenderResult> {
+  const { clip } = params;
+  if (canUseWebCodecs(clip)) {
+    try {
+      return await renderClipWebCodecs(params);
+    } catch (err) {
+      // Cancelamento deliberado não deve virar fallback.
+      if (err instanceof WebCodecsCanceledError) throw err;
+      // Qualquer outra falha do WebCodecs → tenta o FFmpeg.wasm.
+    }
+  }
+  return renderClipFFmpeg(params);
+}
+
+async function renderClipFFmpeg(params: {
   source: SourceVideo;
   clip: Clip;
   onProgress?: (progress: number) => void;
