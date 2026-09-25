@@ -1,6 +1,6 @@
 // Tipos centrais do domínio do Video Clipper Studio.
 
-export type AspectRatioId = "9:16" | "1:1" | "16:9" | "4:5";
+export type AspectRatioId = "original" | "9:16" | "1:1" | "16:9" | "4:5";
 
 export type FillModeId = "fit" | "blur" | "crop";
 
@@ -43,8 +43,12 @@ export interface Clip {
   status: ClipStatus;
   /** 0..100 */
   progress: number;
-  /** URL de objeto do resultado renderizado (mp4) */
+  /** Momento (ms epoch) em que o render começou — usado para estimar o tempo restante. Transitório. */
+  startedAt?: number;
+  /** URL de objeto do resultado renderizado */
   resultUrl?: string;
+  /** Extensão do arquivo renderizado (ex.: "mp4", "webm"). */
+  resultExt?: string;
   errorMessage?: string;
 }
 

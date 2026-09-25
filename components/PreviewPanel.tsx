@@ -5,6 +5,7 @@ import { Play, Pause, RotateCcw, Scissors, Move } from "lucide-react";
 import type { Clip, SourceVideo } from "@/lib/types";
 import { getAspect } from "@/lib/presets";
 import { formatTime } from "@/lib/time";
+import { TimelineTrack } from "./TimelineTrack";
 
 interface PreviewPanelProps {
   source: SourceVideo;
@@ -14,6 +15,7 @@ interface PreviewPanelProps {
   currentTime: number;
   duration: number;
   isPlaying: boolean;
+  peaks: Float32Array | null;
   onTogglePlay: () => void;
   onSeek: (seconds: number) => void;
   onTimeUpdate: (t: number) => void;
@@ -30,6 +32,7 @@ export function PreviewPanel({
   currentTime,
   duration,
   isPlaying,
+  peaks,
   onTogglePlay,
   onSeek,
   onTimeUpdate,
@@ -38,7 +41,11 @@ export function PreviewPanel({
   onUpdateActiveClip,
 }: PreviewPanelProps) {
   const sourceAR = source.width / source.height;
-  const target = activeClip ? getAspect(activeClip.aspect) : null;
+  // No modo "Original" (corte rápido) não há conversão de formato → sem máscara.
+  const target =
+    activeClip && activeClip.aspect !== "original"
+      ? getAspect(activeClip.aspect)
+      : null;
   const frameRef = useRef<HTMLDivElement | null>(null);
 
   const cropX = activeClip?.cropX ?? 0.5;
@@ -228,38 +235,16 @@ export function PreviewPanel({
           </div>
         </div>
 
-        {/* Timeline com marcadores dos clipes */}
-        <div className="relative">
-          <input
-            type="range"
-            min={0}
-            max={duration || 0}
-            step={0.05}
-            value={currentTime}
-            onChange={(e) => onSeek(parseFloat(e.target.value))}
-            className="w-full"
-            aria-label="Linha do tempo"
-          />
-          {/* Faixas dos clipes sobre a timeline */}
-          <div className="pointer-events-none absolute inset-x-0 top-1/2 h-[4px] -translate-y-1/2">
-            {duration > 0 &&
-              clips.map((c) => {
-                const left = (c.start / duration) * 100;
-                const width = ((c.end - c.start) / duration) * 100;
-                const isActive = c.id === activeClip?.id;
-                return (
-                  <div
-                    key={c.id}
-                    className={`absolute top-1/2 h-[6px] -translate-y-1/2 rounded-full ${
-                      isActive ? "bg-accent" : "bg-brand/50"
-                    }`}
-                    style={{ left: `${left}%`, width: `${Math.max(width, 0.5)}%` }}
-                    title={c.name}
-                  />
-                );
-              })}
-          </div>
-        </div>
+        {/* Timeline com waveform, faixas dos clipes e prévia em miniatura */}
+        <TimelineTrack
+          source={source}
+          clips={clips}
+          activeClipId={activeClip?.id ?? null}
+          currentTime={currentTime}
+          duration={duration}
+          peaks={peaks}
+          onSeek={onSeek}
+        />
 
         {activeClip && (
           <div className="mt-3 flex items-center gap-2 text-xs text-slate-400">

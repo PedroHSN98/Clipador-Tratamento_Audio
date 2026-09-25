@@ -39,8 +39,6 @@ export function buildFFmpegArgs(params: {
     cropY = 0.5,
     zoom = 1,
   } = params;
-  const { width: w, height: h } = getAspect(aspect);
-
   // -ss antes de -i = seek rápido (o arquivo inteiro já está no FS virtual).
   const args: string[] = [
     "-ss",
@@ -50,6 +48,18 @@ export function buildFFmpegArgs(params: {
     "-i",
     inputName,
   ];
+
+  // Modo "Original": corte sem reencode (stream copy). É ordens de grandeza
+  // mais rápido, pois não decodifica/recodifica os quadros — apenas copia os
+  // pacotes do intervalo. Mantém o formato/codec e o mesmo contêiner de saída.
+  // Observação: o corte se alinha ao quadro-chave mais próximo do início, então
+  // o começo pode variar frações de segundo.
+  if (aspect === "original") {
+    args.push("-c", "copy", "-movflags", "+faststart", outputName);
+    return args;
+  }
+
+  const { width: w, height: h } = getAspect(aspect);
 
   if (fill === "blur") {
     const filter =
@@ -99,7 +109,7 @@ export function buildFFmpegArgs(params: {
     "-crf",
     crf,
     "-threads",
-    "0", // usa todos os threads disponíveis (core multi-thread)
+    "0", // deixa o FFmpeg escolher; o core atual é single-thread (ver lib/ffmpeg.ts)
     "-pix_fmt",
     "yuv420p",
     "-c:a",

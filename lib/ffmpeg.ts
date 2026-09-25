@@ -61,21 +61,48 @@ export function isFFmpegLoaded(): boolean {
 }
 
 /**
+ * Encerra a instância do FFmpeg.wasm, abortando qualquer render em andamento.
+ * O exec atual rejeita, e a próxima chamada a loadFFmpeg() recria uma instância
+ * limpa. Usado para "cancelar" uma renderização.
+ */
+export function terminateFFmpeg(): void {
+  if (ffmpeg) {
+    try {
+      ffmpeg.terminate();
+    } catch {
+      /* ignore */
+    }
+  }
+  ffmpeg = null;
+  loadPromise = null;
+}
+
+/**
  * Renderiza um clipe: escreve o vídeo original no FS virtual, executa o
  * recorte/conversão e devolve uma Blob URL do mp4 resultante.
  */
+export interface RenderResult {
+  url: string;
+  /** Extensão do arquivo gerado, sem ponto (ex.: "mp4", "webm"). */
+  ext: string;
+}
+
 export async function renderClip(params: {
   source: SourceVideo;
   clip: Clip;
   onProgress?: (progress: number) => void;
-}): Promise<string> {
+}): Promise<RenderResult> {
   const { source, clip, onProgress } = params;
   const instance = await loadFFmpeg();
 
   const ext = guessExt(source.file.name);
   const mountDir = `/mnt-${clip.id}`;
   const mountedName = "source" + ext;
-  const outputName = `clip-${clip.id}.mp4`;
+
+  // No modo "Original" (stream copy) mantemos o contêiner de origem; senão, mp4.
+  const fastCopy = clip.aspect === "original";
+  const outExt = fastCopy ? ext.replace(/^\./, "") || "mp4" : "mp4";
+  const outputName = `clip-${clip.id}.${outExt}`;
 
   // Handler de progresso específico deste render.
   const progressHandler = ({ progress }: { progress: number }) => {
@@ -158,8 +185,11 @@ export async function renderClip(params: {
       );
     }
 
-    // Valida que a saída é um MP4 real e não um arquivo truncado/vazio.
-    if (!bytes || bytes.byteLength < 1024 || !hasMp4Signature(bytes)) {
+    // Valida que a saída não é um arquivo truncado/vazio. Para MP4 também
+    // conferimos a assinatura "ftyp"; no modo cópia com outros contêineres
+    // (webm/mov) basta o tamanho mínimo.
+    const mp4Ok = outExt === "mp4" ? hasMp4Signature(bytes) : true;
+    if (!bytes || bytes.byteLength < 1024 || !mp4Ok) {
       throw new Error(
         "O arquivo gerado ficou incompleto ou inválido. " +
           explainFailure(logLines, code)
@@ -168,8 +198,8 @@ export async function renderClip(params: {
 
     // .slice() copia para um ArrayBuffer novo (não compartilhado), evitando
     // problemas de SharedArrayBuffer/Blob em ambientes cross-origin isolated.
-    const blob = new Blob([bytes.slice()], { type: "video/mp4" });
-    return URL.createObjectURL(blob);
+    const blob = new Blob([bytes.slice()], { type: mimeForExt(outExt) });
+    return { url: URL.createObjectURL(blob), ext: outExt };
   } finally {
     await cleanupInput();
     await safeDelete(instance, outputName);
@@ -365,6 +395,21 @@ async function safeDeleteDir(instance: FFmpeg, dir: string) {
     await instance.deleteDir(dir);
   } catch {
     /* ignore */
+  }
+}
+
+function mimeForExt(ext: string): string {
+  switch (ext.toLowerCase()) {
+    case "webm":
+      return "video/webm";
+    case "mov":
+      return "video/quicktime";
+    case "mkv":
+      return "video/x-matroska";
+    case "avi":
+      return "video/x-msvideo";
+    default:
+      return "video/mp4";
   }
 }
 

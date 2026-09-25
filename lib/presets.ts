@@ -2,6 +2,13 @@ import type { AspectPreset, FillModePreset } from "./types";
 
 export const ASPECT_PRESETS: AspectPreset[] = [
   {
+    id: "original",
+    label: "Original (corte rápido)",
+    hint: "Sem reencode — mantém o formato",
+    width: 0,
+    height: 0,
+  },
+  {
     id: "9:16",
     label: "9:16 Vertical",
     hint: "TikTok • Reels • Shorts",

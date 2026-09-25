@@ -12,6 +12,9 @@ import {
   FlagTriangleLeft,
   ZoomIn,
   Crosshair,
+  Copy,
+  X,
+  Zap,
 } from "lucide-react";
 import type { Clip } from "@/lib/types";
 import { ASPECT_PRESETS, FILL_PRESETS } from "@/lib/presets";
@@ -27,7 +30,9 @@ interface ClipCardProps {
   onSelect: () => void;
   onUpdate: (patch: Partial<Clip>) => void;
   onRemove: () => void;
+  onDuplicate: () => void;
   onRender: () => void;
+  onCancel: () => void;
   onSeek: (t: number) => void;
 }
 
@@ -40,9 +45,12 @@ export function ClipCard({
   onSelect,
   onUpdate,
   onRemove,
+  onDuplicate,
   onRender,
+  onCancel,
   onSeek,
 }: ClipCardProps) {
+  const isOriginal = clip.aspect === "original";
   return (
     <div
       onClick={onSelect}
@@ -65,6 +73,17 @@ export function ClipCard({
           className="min-w-0 flex-1 rounded-md bg-transparent px-1 py-0.5 text-sm font-medium text-white outline-none focus:bg-panel focus:ring-1 focus:ring-brand/50"
         />
         <StatusBadge clip={clip} />
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDuplicate();
+          }}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-brand-soft hover:text-brand"
+          aria-label="Duplicar clipe"
+          title="Duplicar clipe (D)"
+        >
+          <Copy className="h-4 w-4" />
+        </button>
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -137,7 +156,13 @@ export function ClipCard({
         </div>
       </div>
 
-      {/* Modo de enquadramento */}
+      {/* Modo de enquadramento (irrelevante no corte rápido "Original") */}
+      {isOriginal ? (
+        <div className="mb-3 flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 px-2.5 py-2 text-[11px] text-accent">
+          <Zap className="h-3.5 w-3.5 shrink-0" />
+          Corte rápido sem reencode — mantém o formato e a qualidade originais.
+        </div>
+      ) : (
       <div className="mb-3" onClick={(e) => e.stopPropagation()}>
         <label className="mb-1 block text-xs font-medium text-slate-400">
           Enquadramento
@@ -160,9 +185,10 @@ export function ClipCard({
           ))}
         </div>
       </div>
+      )}
 
       {/* Reposicionamento + zoom (só no modo Preencher/Crop) */}
-      {clip.fill === "crop" && (
+      {clip.fill === "crop" && !isOriginal && (
         <div
           className="mb-3 rounded-lg border border-edge bg-panel p-2.5"
           onClick={(e) => e.stopPropagation()}
@@ -202,12 +228,29 @@ export function ClipCard({
         </div>
       )}
 
-      {/* Barra de progresso durante render */}
+      {/* Barra de progresso + ETA + cancelar durante o render */}
       {clip.status === "processing" && (
-        <div className="mb-3">
-          <div className="mb-1 flex justify-between text-[11px] text-slate-400">
-            <span>Renderizando…</span>
-            <span className="font-mono">{clip.progress}%</span>
+        <div className="mb-3" onClick={(e) => e.stopPropagation()}>
+          <div className="mb-1 flex items-center justify-between text-[11px] text-slate-400">
+            <span className="flex items-center gap-2">
+              Renderizando…
+              {etaLabel(clip.startedAt, clip.progress) && (
+                <span className="text-slate-500">
+                  ~{etaLabel(clip.startedAt, clip.progress)} restante
+                </span>
+              )}
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="font-mono">{clip.progress}%</span>
+              <button
+                onClick={onCancel}
+                title="Cancelar renderização"
+                className="flex h-5 w-5 items-center justify-center rounded text-slate-400 transition-colors hover:bg-red-500/10 hover:text-red-400"
+                aria-label="Cancelar renderização"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </span>
           </div>
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-edge">
             <div
@@ -250,7 +293,7 @@ export function ClipCard({
         {clip.resultUrl && (
           <a
             href={clip.resultUrl}
-            download={`${sanitize(clip.name)}.mp4`}
+            download={`${sanitize(clip.name)}.${clip.resultExt || "mp4"}`}
             className="flex items-center gap-1.5 rounded-lg bg-accent/90 px-2.5 py-1.5 text-xs font-medium text-panel transition-colors hover:bg-accent"
           >
             <Download className="h-3.5 w-3.5" /> Baixar
@@ -338,6 +381,18 @@ function TimeField({
 
 function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
+}
+
+/** Estima o tempo restante do render a partir do tempo decorrido e do progresso. */
+function etaLabel(startedAt: number | undefined, progress: number): string | null {
+  if (!startedAt || progress < 3) return null; // precisa de amostra mínima
+  const elapsed = (Date.now() - startedAt) / 1000;
+  const remaining = (elapsed / progress) * (100 - progress);
+  if (!Number.isFinite(remaining) || remaining < 0) return null;
+  if (remaining < 60) return `${Math.ceil(remaining)}s`;
+  const m = Math.floor(remaining / 60);
+  const s = Math.ceil(remaining % 60);
+  return `${m}m${String(s).padStart(2, "0")}s`;
 }
 
 function sanitize(name: string): string {
