@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-panel text-slate-200 antialiased;
+  background-image: radial-gradient(
+      1200px 600px at 15% -10%,
+      rgba(109, 94, 252, 0.12),
+      transparent 60%
+    ),
+    radial-gradient(
+      900px 500px at 110% 10%,
+      rgba(34, 211, 238, 0.08),
+      transparent 55%
+    );
+}
+
+/* Scrollbar dark discreta */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #2c3140;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a4054;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Range input estilizado (usado nos sliders de tempo) */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: #2c3140;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  margin-top: -6px;
+  height: 16px;
+  width: 16px;
+  border-radius: 999px;
+  background: #6d5efc;
+  border: 2px solid #d7d2ff;
+  box-shadow: 0 0 0 4px rgba(109, 94, 252, 0.18);
+}
+input[type="range"]:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid #22d3ee;
+  outline-offset: 2px;
+}
+
+/* Slider duplo: trilhos nativos transparentes (a faixa é desenhada por divs) */
+.dual-range::-webkit-slider-runnable-track {
+  background: transparent;
+}
+.dual-range::-moz-range-track {
+  background: transparent;
+}
