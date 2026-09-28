@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { Play, Pause, RotateCcw, Scissors, Move, Camera, Plus, X } from "lucide-react";
+import { Play, Pause, RotateCcw, Scissors, Move, Camera, Plus, X, Copy } from "lucide-react";
 import type { Clip, SourceVideo } from "@/lib/types";
 import { getAspect } from "@/lib/presets";
 import { formatTime } from "@/lib/time";
@@ -32,6 +32,8 @@ interface PreviewPanelProps {
   onRemoveFraming: (t: number) => void;
   /** Move o enquadramento de índice `index` para o tempo `newT`. */
   onMoveFraming: (index: number, newT: number) => void;
+  /** Copia a posição/zoom do enquadramento `sourceIndex` para o ativo. */
+  onReuseFraming: (sourceIndex: number) => void;
 }
 
 export function PreviewPanel({
@@ -52,6 +54,7 @@ export function PreviewPanel({
   onAddFraming,
   onRemoveFraming,
   onMoveFraming,
+  onReuseFraming,
 }: PreviewPanelProps) {
   const sourceAR = source.width / source.height;
   // No modo "Original" (corte rápido) não há conversão de formato → sem máscara.
@@ -288,6 +291,7 @@ export function PreviewPanel({
               onAdd={onAddFraming}
               onRemove={onRemoveFraming}
               onSeek={onSeek}
+              onReuse={onReuseFraming}
             />
           )}
       </div>
@@ -348,12 +352,14 @@ function FramingControls({
   onAdd,
   onRemove,
   onSeek,
+  onReuse,
 }: {
   clip: Clip;
   currentTime: number;
   onAdd: () => void;
   onRemove: (t: number) => void;
   onSeek: (t: number) => void;
+  onReuse: (sourceIndex: number) => void;
 }) {
   const framings =
     clip.framings ?? [
@@ -412,10 +418,31 @@ function FramingControls({
         })}
       </div>
 
+      {/* Reusar: copia a posição de outra câmera para o enquadramento ativo */}
+      {framings.length > 1 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-edge pt-2">
+          <span className="flex items-center gap-1 text-[10px] text-slate-500">
+            <Copy className="h-3 w-3" /> Reusar posição de:
+          </span>
+          {framings.map((f, i) =>
+            i === activeIdx ? null : (
+              <button
+                key={`reuse-${i}`}
+                onClick={() => onReuse(i)}
+                title={`Copiar a posição/zoom do enquadramento ${i + 1} para o atual`}
+                className="rounded-md border border-edge bg-panel-lighter px-1.5 py-0.5 text-[11px] font-mono text-slate-300 transition-colors hover:border-brand/50 hover:text-white"
+              >
+                {i + 1}
+              </button>
+            )
+          )}
+        </div>
+      )}
+
       <p className="mt-1.5 text-[10px] leading-tight text-slate-500">
         Vá até a troca de câmera, clique em “Adicionar no tempo atual” e
         reposicione a caixa no preview. Cada trecho mantém seu enquadramento até
-        o próximo (corte seco).
+        o próximo (corte seco). Use “Reusar” para voltar a uma câmera igual.
       </p>
     </div>
   );

@@ -219,6 +219,30 @@ export default function Page() {
     []
   );
 
+  // Copia a posição/zoom de um enquadramento existente para o ativo (tempo atual).
+  const reuseFramingAt = useCallback(
+    (clipId: string, sourceIndex: number) => {
+      const t = currentTimeRef.current;
+      setClips((prev) =>
+        prev.map((c) => {
+          if (c.id !== clipId) return c;
+          const list =
+            c.framings ?? [
+              { t: c.start, cropX: c.cropX, cropY: c.cropY, zoom: c.zoom },
+            ];
+          const src = list[sourceIndex];
+          if (!src) return c;
+          return applyFramingPatch(c, t, {
+            cropX: src.cropX,
+            cropY: src.cropY,
+            zoom: src.zoom,
+          });
+        })
+      );
+    },
+    []
+  );
+
   // Edita o crop/zoom do enquadramento ativo (no tempo atual) de um clipe.
   const updateClipFraming = useCallback(
     (
@@ -625,6 +649,9 @@ export default function Page() {
               }
               onMoveFraming={(index, newT) =>
                 activeClip && moveFramingTime(activeClip.id, index, newT)
+              }
+              onReuseFraming={(sourceIndex) =>
+                activeClip && reuseFramingAt(activeClip.id, sourceIndex)
               }
             />
           </section>
